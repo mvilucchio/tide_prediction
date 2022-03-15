@@ -1,0 +1,9 @@
+prova kNN con nuova learned metric
+other classical models
+LSTM
+
+to do:
+
+transforma il dataset in un supervised learning task. 
+
+cerca di capire quale zona dei campi di pressione ci interessa di più. Magari con un NN?
