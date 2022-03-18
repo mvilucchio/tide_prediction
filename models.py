@@ -128,14 +128,14 @@ class Seq2SeqSurge(nn.Module):
 
     
 class EncoderSeqVit(nn.Module):
-    def __init__(self, seq_len=10, num_channels = 1, output_length = 10, image_size=41, encoder_stride=4, hidden_dim=512):
+    def __init__(self, seq_len=10, num_channels = 1, output_length = 10, image_size=41, encoder_stride=4, hidden_dim=64):
         super(EncoderSeqVit, self).__init__()
 
-        config1 = ViTConfig(image_size = 41, patch_size = 4, num_channels = num_channels, encoder_stride = 4)
+        config1 = ViTConfig(image_size = 41, patch_size = 4, num_channels = seq_len, encoder_stride = 4)
         self.hidden_size1 = int((image_size // encoder_stride)**2 + 1) * config1.hidden_size
         self.ViT = ViTModel(config1)
 
-        config2 = ViTConfig(image_size = 41, patch_size = 4, num_channels = num_channels, encoder_stride = 4)
+        config2 = ViTConfig(image_size = 41, patch_size = 4, num_channels = seq_len, encoder_stride = 4)
         self.hidden_size2 = int((image_size // encoder_stride)**2 + 1) * config2.hidden_size
         self.ViT2 = ViTModel(config2)
 
@@ -144,7 +144,7 @@ class EncoderSeqVit(nn.Module):
         self.num_layers = 1
 
         self.lstm = nn.LSTM(
-          input_size=self.hidden_size1 + self.hidden_size2 + 4,
+          input_size=4,
           hidden_size=self.hidden_dim,
           num_layers=self.num_layers,
           batch_first=True,
@@ -167,13 +167,10 @@ class EncoderSeqVit(nn.Module):
 
         batch_size = surge1.size(0)
         
-        x = torch.empty(batch_size, self.seq_len, self.hidden_size1 + self.hidden_size2 + 4)
+        hidden1 = self.ViT(pressure1).last_hidden_state.reshape(-1, self.hidden_size1)
+        hidden2 = self.ViT(pressure2).last_hidden_state.reshape(-1, self.hidden_size2)
 
-        for i in range(self.seq_len):
-            hidden1 = self.ViT(pressure1[:,i,:,:].unsqueeze(1)).last_hidden_state.reshape(-1, self.hidden_size1)
-            hidden2 = self.ViT(pressure2[:,i,:,:].unsqueeze(1)).last_hidden_state.reshape(-1, self.hidden_size2)
-
-            x[:,i,:-4] = torch.concat([hidden1, hidden2], dim=1)
+        x = torch.empty(batch_size, self.seq_len, 4)
 
         x[:,:,-4:] = torch.concat(
             [time1.unsqueeze(2), time2.unsqueeze(2), surge1.unsqueeze(2), surge2.unsqueeze(2)], 
