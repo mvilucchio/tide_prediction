@@ -59,23 +59,44 @@ class PressureEncorderLinear(nn.Module):
         return x
 
 class PressureEncorderFull(nn.Module):
-    def __init__(self, image_size = 41, patch_size = 4, num_channels = 40, encoder_stride = 4):
+    def __init__(self, scale_finder=None, image_size = 41, patch_size = 4, num_channels = 40, encoder_stride = 4):
         super(PressureEncorderFull, self).__init__()
-        config = ViTConfig(image_size = 41, patch_size = 4, num_channels = num_channels, encoder_stride = 4, )
-        self.hidden_size = int((image_size // encoder_stride)**2 + 1) * config.hidden_size
-        self.ViT = ViTModel(config)
+        self.ViT = ViTEncoder()
         layers = [
-            nn.Linear(self.hidden_size + 46, 200),
+            nn.Linear(self.ViT.out_features + 46, 200),
             nn.ReLU(),
             nn.Linear(200, 20)
         ]
         self.mlp = nn.Sequential(*layers)
 
+        if scale_finder is None:
+            self.fc_scale_size = nn.Linear(6, 4)
+        else:
+            self.fc_scale_size = scale_finder
+
     def forward(self, x):
         pressure, surge, time, scale_and_size = x
         hidden = self.ViT(pressure).last_hidden_state.reshape(-1, self.hidden_size)
-        x = torch.concat([hidden, surge, time, scale_and_size], dim = 1)
+        x = torch.concat([hidden, surge, time], dim = 1)
         x = self.mlp(x)
+
+        new_scale_and_size = self.fc_scale_size(scale_and_size)
+        scale = torch.concat(
+            [
+                new_scale_and_size[:,1][:,None] * torch.ones((x.shape[0], 10)).to(device), 
+                new_scale_and_size[:,3][:,None] * torch.ones((x.shape[0], 10)).to(device), 
+            ],
+            dim=1
+        ).to(device)
+        mean = torch.concat(
+            [
+                new_scale_and_size[:,0][:,None] * torch.ones((x.shape[0], 10)).to(device), 
+                new_scale_and_size[:,2][:,None] * torch.ones((x.shape[0], 10)).to(device), 
+            ],
+            dim=1
+        ).to(device)
+        x = scale * x + mean
+        
         return x
 
 class ScaleFinder(nn.Module):
@@ -114,19 +135,18 @@ class PressureEncorderSemiFull(nn.Module):
         x = torch.concat([hidden, surge], dim = 1)
         x = self.mlp(x)
         
-        new_scale_and_size = self.fc_scale_size(scale_and_size) # [mean_1, std_1, mean_2, std_2]
-        new_scale_and_size[:,1][:,None] * torch.ones((x.shape[0], 10))
+        new_scale_and_size = self.fc_scale_size(scale_and_size)
         scale = torch.concat(
             [
-                new_scale_and_size[:,1][:,None] * torch.ones((x.shape[0], 10)), 
-                new_scale_and_size[:,3][:,None] * torch.ones((x.shape[0], 10)), 
+                new_scale_and_size[:,1][:,None] * torch.ones((x.shape[0], 10)).to(device), 
+                new_scale_and_size[:,3][:,None] * torch.ones((x.shape[0], 10)).to(device), 
             ],
             dim=1
         ).to(device)
         mean = torch.concat(
             [
-                new_scale_and_size[:,0][:,None] * torch.ones((x.shape[0], 10)), 
-                new_scale_and_size[:,2][:,None] * torch.ones((x.shape[0], 10)), 
+                new_scale_and_size[:,0][:,None] * torch.ones((x.shape[0], 10)).to(device), 
+                new_scale_and_size[:,2][:,None] * torch.ones((x.shape[0], 10)).to(device), 
             ],
             dim=1
         ).to(device)
