@@ -72,7 +72,11 @@ def data_prepare(X, train_set=True, surge1=True):
 
  
     hours_in_year_surge_1_ = time_to_hour(t_surge1_input_)
+<<<<<<< Updated upstream
     hours_in_year_surge_2_ = time_to_hour(t_surge2_input_)
+=======
+    hours_in_year_surge_2_ = time_to_hour(t_surge1_input_)
+>>>>>>> Stashed changes
     hours_in_year_surge_1_output_ = time_to_hour(t_surge1_output_)
     hours_in_year_surge_2_output_ = time_to_hour(t_surge2_output_)
     hours_in_year_slp_ = time_to_hour(t_slp_)
