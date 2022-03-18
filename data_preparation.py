@@ -432,7 +432,7 @@ def data_prepare(X, train_set=True, surge1=True):
 
             test_data = list(zip(pressure1_test, surge1_test, t_surge1_test))
 
-            batch_size = 509
+            batch_size = 8
 
             test_dataloader = DataLoader(
                 test_data,
@@ -487,7 +487,7 @@ def data_prepare(X, train_set=True, surge1=True):
 
             test_data = list(zip(pressure2_test, surge2_test, t_surge2_test))
 
-            batch_size = 509
+            batch_size = 8
 
             test_dataloader = DataLoader(
                 test_data,
