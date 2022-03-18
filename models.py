@@ -8,7 +8,7 @@ from transformers import ViTFeatureExtractor, ViTModel, ViTConfig
 from torch.autograd import Variable
 import math
 
-#device = torch.device('cuda')
+device = torch.device('cuda')
 
 class PressureEncorder(nn.Module):
     def __init__(self, image_size = 41, patch_size = 4, num_channels = 1, encoder_stride = 4):
@@ -24,6 +24,21 @@ class PressureEncorder(nn.Module):
         hidden = self.ViT(pressure).last_hidden_state.reshape(-1, self.hidden_size)
         print()
         x = torch.concat([hidden, surge, time], dim = 1)
+        x = self.linear(x)
+        return x
+
+class PressureEncorderFull(nn.Module):
+    def __init__(self, image_size = 41, patch_size = 4, num_channels = 40, encoder_stride = 4):
+        super(PressureEncorderFull, self).__init__()
+        config = ViTConfig(image_size = 41, patch_size = 4, num_channels = num_channels, encoder_stride = 4)
+        self.hidden_size = int((image_size // encoder_stride)**2 + 1) * config.hidden_size
+        self.ViT = ViTModel(config)
+        self.linear = nn.Linear(self.hidden_size + 20, 20)
+        
+    def forward(self, x):
+        pressure, surge = x
+        hidden = self.ViT(pressure).last_hidden_state.reshape(-1, self.hidden_size)
+        x = torch.concat([hidden, surge], dim = 1)
         x = self.linear(x)
         return x
 
@@ -211,4 +226,70 @@ class EncoderSeqVit(nn.Module):
 
         out = self.mlp(last_x)
 
+        return out
+
+class EncoderSeqVitBig(nn.Module):
+    def __init__(self, seq_len=10, num_channels = 1, output_length = 10, image_size=41, encoder_stride=4, hidden_dim=64):
+        super(EncoderSeqVitBig, self).__init__()
+        config1 = ViTConfig(image_size = 41, patch_size = 4, num_channels = num_channels, encoder_stride = 4)
+        self.hidden_size1 = int((image_size // encoder_stride)**2 + 1) * config1.hidden_size
+        self.ViT = ViTModel(config1)
+        config2 = ViTConfig(image_size = 41, patch_size = 4, num_channels = num_channels, encoder_stride = 4)
+        self.hidden_size2 = int((image_size // encoder_stride)**2 + 1) * config2.hidden_size
+        self.ViT2 = ViTModel(config2)
+        self.seq_len = seq_len
+        self.hidden_dim = hidden_dim
+        self.num_layers = 1
+        self.lstm = nn.LSTM(
+          input_size=self.hidden_size1 + self.hidden_size2 + 4,
+          hidden_size=self.hidden_dim,
+          num_layers=self.num_layers,
+          batch_first=True,
+          # dropout = 0.1
+        )
+        self.fc = nn.Linear(self.hidden_dim + 8, 2 * output_length)
+   
+    def forward(self, x):
+        (
+            pressure1, 
+            pressure2, 
+            time1, time2, 
+            surge1, surge2, 
+            mean_surge_1, mean_surge_2, 
+            std_surge_1, std_surge_2, 
+            mean_p_1, mean_p_2, 
+            std_p_1, std_p_2
+        ) = x
+        batch_size = surge1.size(0)
+        
+        x = torch.empty(batch_size, self.seq_len, self.hidden_size1 + self.hidden_size2 + 4).to(device)
+        
+        for i in range(self.seq_len):
+            hidden1 = self.ViT(pressure1[:,i,:,:].unsqueeze(1)).last_hidden_state.reshape(-1, self.hidden_size1)
+            hidden2 = self.ViT(pressure2[:,i,:,:].unsqueeze(1)).last_hidden_state.reshape(-1, self.hidden_size2)
+            x[:,i,:-4] = torch.concat([hidden1, hidden2], dim=1)
+
+        x[:,:,-4:] = torch.concat(
+            [time1.unsqueeze(2), time2.unsqueeze(2), surge1.unsqueeze(2), surge2.unsqueeze(2)], 
+            dim=2
+        )
+        h_0 = Variable(torch.zeros(self.num_layers, batch_size, self.hidden_dim).to(device))
+        c_0 = Variable(torch.zeros(self.num_layers, batch_size, self.hidden_dim).to(device))
+              
+        x, (hidden, cell) = self.lstm(x, (h_0, c_0))
+        last_x = torch.concat(
+            [
+                hidden.squeeze(0), 
+                mean_surge_1.unsqueeze(1), 
+                mean_surge_2.unsqueeze(1), 
+                std_surge_1.unsqueeze(1), 
+                std_surge_2.unsqueeze(1), 
+                mean_p_1.unsqueeze(1), 
+                mean_p_2.unsqueeze(1), 
+                std_p_1.unsqueeze(1), 
+                std_p_2.unsqueeze(1)
+            ], 
+            dim=1
+        )
+        out = self.fc(last_x)
         return out
