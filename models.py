@@ -8,7 +8,7 @@ from transformers import ViTFeatureExtractor, ViTModel, ViTConfig
 from torch.autograd import Variable
 import math
 
-device = torch.device('cpu')
+device = torch.device('cuda')
 
 class PressureEncorder(nn.Module):
     def __init__(self, image_size = 41, patch_size = 4, num_channels = 1, encoder_stride = 4):
