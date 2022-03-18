@@ -33,12 +33,12 @@ class PressureEncorderFull(nn.Module):
         config = ViTConfig(image_size = 41, patch_size = 4, num_channels = num_channels, encoder_stride = 4)
         self.hidden_size = int((image_size // encoder_stride)**2 + 1) * config.hidden_size
         self.ViT = ViTModel(config)
-        self.linear = nn.Linear(self.hidden_size + 20, 20)
+        self.linear = nn.Linear(self.hidden_size + 46, 20)
         
     def forward(self, x):
-        pressure, surge = x
+        pressure, surge, time, scale_and_size = x
         hidden = self.ViT(pressure).last_hidden_state.reshape(-1, self.hidden_size)
-        x = torch.concat([hidden, surge], dim = 1)
+        x = torch.concat([hidden, surge, time, scale_and_size], dim = 1)
         x = self.linear(x)
         return x
 
