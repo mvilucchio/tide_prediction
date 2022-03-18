@@ -24,6 +24,69 @@ def time_to_hour(array):
                 hours_array[i][j] = tt.tm_yday * 24 + tt.tm_hour
         return hours_array / (366 * 24)
 
+def data_prepare_pretrain_semifull_small(X, Y_train, train=True):
+    slp_ = X['slp']
+
+    if train:
+        Y_1 = Y_train[['surge1_t0', 'surge1_t1', 'surge1_t2', 'surge1_t3', 'surge1_t4', 'surge1_t5', 'surge1_t6', 'surge1_t7', 'surge1_t8', 'surge1_t9']].to_numpy()
+        Y_2 = Y_train[['surge2_t0', 'surge2_t1', 'surge2_t2', 'surge2_t3', 'surge2_t4', 'surge2_t5', 'surge2_t6', 'surge2_t7', 'surge2_t8', 'surge2_t9']].to_numpy()
+
+    surge1_input_ = X['surge1_input']
+    surge2_input_ = X['surge2_input']
+
+    mean_surge1_input_ = np.mean(surge1_input_, axis=1)
+    std_surge1_input_ = np.std(surge1_input_, axis=1)
+    mean_surge2_input_ = np.mean(surge2_input_, axis=1)
+    std_surge2_input_ = np.std(surge2_input_, axis=1)
+
+    scaled_surge1_input_ = (surge1_input_ - mean_surge1_input_[:,None]) / std_surge1_input_[:,None]
+    scaled_surge2_input_ = (surge2_input_ - mean_surge2_input_[:,None]) / std_surge2_input_[:,None]
+
+    mean_pressures = np.mean(slp_, axis=(1,2,3))
+    std_pressures = np.std(slp_, axis=(1,2,3))
+
+    scaled_pressures = (slp_ - mean_pressures[:,None,None,None]) / std_pressures[:,None,None, None]
+    scaled_surge_full = np.concatenate([scaled_surge1_input_, scaled_surge2_input_], axis=1)
+
+    if train:
+        Y_full = np.concatenate([Y_1, Y_2], axis=1)
+        train_idx, val_idx = idxs_train_val(len(surge1_input_), 0.9)
+
+        pressure_train, pressure_val = scaled_pressures[train_idx], scaled_pressures[val_idx]
+        surge_train, surge_val = scaled_surge_full[train_idx], scaled_surge_full[val_idx]
+        Y_train, Y_val = Y_full[train_idx], Y_full[val_idx]
+
+        train_data = list(zip(pressure_train, surge_train, Y_train))
+        val_data = list(zip(pressure_val, surge_val, Y_val))
+
+        batch_size = 8
+
+        train_dataloader = DataLoader(
+            train_data,
+            batch_size=batch_size,
+            shuffle=True
+        )
+
+        val_dataloader = DataLoader(
+            val_data,
+            batch_size=batch_size,
+            shuffle=False
+        )
+        return train_dataloader, val_dataloader
+    else:
+        data = list(zip(scaled_pressures, scaled_surge_full))
+
+        batch_size = 8
+
+        dataloader = DataLoader(
+            data,
+            batch_size=batch_size,
+            shuffle=False
+        )
+
+        return dataloader
+
+
 def data_prepare_pretrain(X, Y_train, train=True):
     slp_ = X['slp']
 
