@@ -24,6 +24,75 @@ def time_to_hour(array):
                 hours_array[i][j] = tt.tm_yday * 24 + tt.tm_hour
         return hours_array / (366 * 24)
 
+def data_preparation_means_std(X, Y_train):
+    slp_ = X['slp']
+
+    Y_1 = Y_train[['surge1_t0', 'surge1_t1', 'surge1_t2', 'surge1_t3', 'surge1_t4', 'surge1_t5', 'surge1_t6', 'surge1_t7', 'surge1_t8', 'surge1_t9']].to_numpy()
+    Y_2 = Y_train[['surge2_t0', 'surge2_t1', 'surge2_t2', 'surge2_t3', 'surge2_t4', 'surge2_t5', 'surge2_t6', 'surge2_t7', 'surge2_t8', 'surge2_t9']].to_numpy()
+
+    surge1_input_ = X['surge1_input']
+    surge2_input_ = X['surge2_input']
+
+    mean_surge1_input_ = np.mean(surge1_input_, axis=1)
+    std_surge1_input_ = np.std(surge1_input_, axis=1)
+    mean_surge2_input_ = np.mean(surge2_input_, axis=1)
+    std_surge2_input_ = np.std(surge2_input_, axis=1)
+
+    mean_pressures = np.mean(slp_, axis=(1,2,3))
+    std_pressures = np.std(slp_, axis=(1,2,3))
+
+    mean_surge1_output_ = np.mean(Y_1, axis=1)
+    std_surge1_output_ = np.std(Y_1, axis=1)
+    mean_surge2_output_ = np.mean(Y_2, axis=1)
+    std_surge2_output_ = np.std(Y_2, axis=1)
+
+    scale_and_size_old = np.concatenate(
+        [
+            mean_pressures[:,None],
+            std_pressures[:,None],
+            mean_surge1_input_[:,None],
+            std_surge1_input_[:,None],
+            mean_surge2_input_[:,None],
+            std_surge2_input_[:,None]
+        ],
+        axis=1
+    )
+
+    scale_and_size_new = np.concatenate(
+        [
+            mean_surge1_output_[:,None],
+            std_surge1_output_[:,None],
+            mean_surge2_output_[:,None],
+            std_surge2_output_[:,None]
+        ],
+        axis=1
+    )
+
+    train_idx, val_idx = idxs_train_val(len(surge1_input_), 0.9)
+
+    scale_old_train, scale_old_val = scale_and_size_old[train_idx], scale_and_size_old[val_idx]
+    scale_new_train, scale_new_val = scale_and_size_new[train_idx], scale_and_size_new[val_idx]
+
+    train_data = list(zip(scale_old_train, scale_new_train))
+    val_data = list(zip(scale_old_val, scale_new_val))
+
+    batch_size = 8
+
+    train_dataloader = DataLoader(
+        train_data,
+        batch_size=batch_size,
+        shuffle=True
+    )
+
+    val_dataloader = DataLoader(
+        val_data,
+        batch_size=batch_size,
+        shuffle=False
+    )
+    
+    return train_dataloader, val_dataloader
+    
+
 def data_prepare_pretrain_semifull_small(X, Y_train, train=True):
     slp_ = X['slp']
 

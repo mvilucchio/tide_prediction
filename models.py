@@ -8,7 +8,40 @@ from transformers import ViTFeatureExtractor, ViTModel, ViTConfig
 from torch.autograd import Variable
 import math
 
-device = torch.device('cuda')
+device = torch.device('cpu')
+
+class ViTEncoder(nn.Module):
+    def __init__(
+            self, 
+            image_size = 41, 
+            patch_size= 4, 
+            num_channels = 40, 
+            encoder_stride = 4, 
+            seq_length=60, 
+            out_features= 256,
+            num_hidden_layers = 2
+        ):
+        super(ViTEncoder, self).__init__()
+        config = ViTConfig(
+            image_size=image_size, 
+            patch_size=patch_size, 
+            num_channels=num_channels, 
+            encoder_stride=encoder_stride,
+            num_attention_heads = 4, 
+            hidden_size = 40, 
+            num_hidden_layers = num_hidden_layers
+        )
+        self.seq_length, self.out_features = seq_length, out_features
+        self.image_size = image_size
+        number_patches =  int((image_size//encoder_stride)**2 + 1) # 101
+        self.hidden_size = number_patches * config.hidden_size # 101*768
+        self.ViT = ViTModel(config)
+        self.fc = nn.Linear(self.hidden_size, self.out_features)
+        
+    def forward(self, x):
+        x = self.ViT(x).last_hidden_state.reshape(-1, self.hidden_size)
+        x = self.fc(x)
+        return x #.reshape(-1, self.seq_length, self.out_features)
 
 class PressureEncorderLinear(nn.Module):
     def __init__(self, image_size = 41, patch_size = 4, num_channels = 40, encoder_stride = 4):
@@ -28,7 +61,7 @@ class PressureEncorderLinear(nn.Module):
 class PressureEncorderFull(nn.Module):
     def __init__(self, image_size = 41, patch_size = 4, num_channels = 40, encoder_stride = 4):
         super(PressureEncorderFull, self).__init__()
-        config = ViTConfig(image_size = 41, patch_size = 4, num_channels = num_channels, encoder_stride = 4)
+        config = ViTConfig(image_size = 41, patch_size = 4, num_channels = num_channels, encoder_stride = 4, )
         self.hidden_size = int((image_size // encoder_stride)**2 + 1) * config.hidden_size
         self.ViT = ViTModel(config)
         layers = [
@@ -45,24 +78,60 @@ class PressureEncorderFull(nn.Module):
         x = self.mlp(x)
         return x
 
-class PressureEncorderSemiFull(nn.Module):
-    def __init__(self, image_size = 41, patch_size = 4, num_channels = 40, encoder_stride = 4):
-        super(PressureEncorderSemiFull, self).__init__()
-        config = ViTConfig(image_size = 41, patch_size = 4, num_channels = num_channels, encoder_stride = 4)
-        self.hidden_size = int((image_size // encoder_stride)**2 + 1) * config.hidden_size
-        self.ViT = ViTModel(config)
+class ScaleFinder(nn.Module):
+    def __init__(self):
+        super(ScaleFinder, self).__init__()
         layers = [
-            nn.Linear(self.hidden_size + 26, 200),
+            nn.Linear(6,4),
+            nn.Sigmoid(),
+            nn.Linear(4, 4)
+        ]
+        self.fc_scale_size = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.fc_scale_size(x)
+
+
+class PressureEncorderSemiFull(nn.Module):
+    def __init__(self, scale_finder=None, image_size = 41, patch_size = 4, num_channels = 40, encoder_stride = 4):
+        super(PressureEncorderSemiFull, self).__init__()
+        self.ViT = ViTEncoder()
+        layers = [
+            nn.Linear(self.ViT.out_features + 20, 200),
             nn.ReLU(),
             nn.Linear(200, 20)
         ]
         self.mlp = nn.Sequential(*layers)
+
+        if scale_finder is None:
+            self.fc_scale_size = nn.Linear(6, 4)
+        else:
+            self.fc_scale_size = scale_finder
         
-    def forward(self, x):
+    def forward(self, x): # scale and size contains the pressure
         pressure, surge, scale_and_size = x
-        hidden = self.ViT(pressure).last_hidden_state.reshape(-1, self.hidden_size)
-        x = torch.concat([hidden, surge, scale_and_size], dim = 1)
+        hidden = self.ViT(pressure)
+        x = torch.concat([hidden, surge], dim = 1)
         x = self.mlp(x)
+        
+        new_scale_and_size = self.fc_scale_size(scale_and_size) # [mean_1, std_1, mean_2, std_2]
+        new_scale_and_size[:,1][:,None] * torch.ones((x.shape[0], 10))
+        scale = torch.concat(
+            [
+                new_scale_and_size[:,1][:,None] * torch.ones((x.shape[0], 10)), 
+                new_scale_and_size[:,3][:,None] * torch.ones((x.shape[0], 10)), 
+            ],
+            dim=1
+        ).to(device)
+        mean = torch.concat(
+            [
+                new_scale_and_size[:,0][:,None] * torch.ones((x.shape[0], 10)), 
+                new_scale_and_size[:,2][:,None] * torch.ones((x.shape[0], 10)), 
+            ],
+            dim=1
+        ).to(device)
+        x = scale * x + mean
+        
         return x
 
 class Encoder(nn.Module):
@@ -164,7 +233,84 @@ class Seq2SeqSurge(nn.Module):
 
         return targets
 
-    
+class EncoderSeqVitSingle(nn.Module):
+    def __init__(self, seq_len=10, num_channels = 1, output_length = 10, image_size=41, encoder_stride=4, hidden_dim=64):
+        super(EncoderSeqVitSingle, self).__init__()
+
+        config = ViTConfig(image_size = 41, patch_size = 4, num_channels = 40, encoder_stride = 4)
+        self.hidden_size = int((image_size // encoder_stride)**2 + 1) * config.hidden_size
+        self.ViT = ViTModel(config)
+
+        self.seq_len = seq_len
+        self.hidden_dim = hidden_dim
+        self.num_layers = 1
+
+        self.lstm = nn.LSTM(
+            input_size=4,
+            hidden_size=self.hidden_dim,
+            num_layers=self.num_layers,
+            batch_first=True,
+            # dropout = 0.1
+        )
+
+        layers = [
+            nn.Linear(self.hidden_size1 + self.hidden_dim + 8, 1000),
+            nn.ReLU(), 
+            nn.Linear(1000, 100),
+            nn.ReLU(),
+            nn.Linear(100, 2 * output_length)
+        ]
+
+        self.mlp = nn.Sequential(*layers)
+   
+    def forward(self, x, device=torch.device('cuda')):
+        (
+            pressure, 
+            time1, time2, 
+            surge1, surge2, 
+            mean_surge_1, mean_surge_2, 
+            std_surge_1, std_surge_2, 
+            mean_p_1, mean_p_2, 
+            std_p_1, std_p_2
+        ) = x
+
+        batch_size = surge1.size(0)
+        
+        hidden_vit = self.ViT(pressure).last_hidden_state.reshape(-1, self.hidden_size1)
+
+        x = torch.empty(batch_size, self.seq_len, 4).to(device)
+
+        x[:,:,-4:] = torch.concat(
+            [time1.unsqueeze(2), time2.unsqueeze(2), surge1.unsqueeze(2), surge2.unsqueeze(2)], 
+            dim=2
+        )
+
+        h_0 = Variable(torch.zeros(self.num_layers, batch_size, self.hidden_dim).to(device))
+        c_0 = Variable(torch.zeros(self.num_layers, batch_size, self.hidden_dim).to(device))
+              
+        x, (hidden, cell) = self.lstm(x, (h_0, c_0))
+
+        last_x = torch.concat(
+            [
+                hidden_vit,
+                hidden.squeeze(0), 
+                mean_surge_1.unsqueeze(1), 
+                mean_surge_2.unsqueeze(1), 
+                std_surge_1.unsqueeze(1), 
+                std_surge_2.unsqueeze(1), 
+                mean_p_1.unsqueeze(1), 
+                mean_p_2.unsqueeze(1), 
+                std_p_1.unsqueeze(1), 
+                std_p_2.unsqueeze(1)
+            ], 
+            dim=1
+        )
+
+        out = self.mlp(last_x)
+
+        return out
+
+
 class EncoderSeqVit(nn.Module):
     def __init__(self, seq_len=10, num_channels = 1, output_length = 10, image_size=41, encoder_stride=4, hidden_dim=64):
         super(EncoderSeqVit, self).__init__()
@@ -182,11 +328,11 @@ class EncoderSeqVit(nn.Module):
         self.num_layers = 1
 
         self.lstm = nn.LSTM(
-          input_size=4,
-          hidden_size=self.hidden_dim,
-          num_layers=self.num_layers,
-          batch_first=True,
-          # dropout = 0.1
+            input_size=4,
+            hidden_size=self.hidden_dim,
+            num_layers=self.num_layers,
+            batch_first=True,
+            # dropout = 0.1
         )
 
         # self.fc = nn.Linear(self.hidden_size1 + self.hidden_size2 + self.hidden_dim + 8, 2 * output_length)
