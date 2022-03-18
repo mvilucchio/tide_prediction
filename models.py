@@ -10,20 +10,18 @@ import math
 
 device = torch.device('cuda')
 
-class PressureEncorder(nn.Module):
-    def __init__(self, image_size = 41, patch_size = 4, num_channels = 1, encoder_stride = 4):
-        super(PressureEncorder, self).__init__()
+class PressureEncorderLinear(nn.Module):
+    def __init__(self, image_size = 41, patch_size = 4, num_channels = 40, encoder_stride = 4):
+        super(PressureEncorderLinear, self).__init__()
         config = ViTConfig(image_size = 41, patch_size = 4, num_channels = num_channels, encoder_stride = 4)
         self.hidden_size = int((image_size // encoder_stride)**2 + 1) * config.hidden_size
         self.ViT = ViTModel(config)
-        self.linear = nn.Linear(self.hidden_size + 2, 10)
+        self.linear = nn.Linear(self.hidden_size + 20, 20)
         
     def forward(self, x):
-        pressure, surge, time = x
-        time = time.float()
+        pressure, surge = x
         hidden = self.ViT(pressure).last_hidden_state.reshape(-1, self.hidden_size)
-        print()
-        x = torch.concat([hidden, surge, time], dim = 1)
+        x = torch.concat([hidden, surge], dim = 1)
         x = self.linear(x)
         return x
 
@@ -54,7 +52,7 @@ class PressureEncorderSemiFull(nn.Module):
         self.hidden_size = int((image_size // encoder_stride)**2 + 1) * config.hidden_size
         self.ViT = ViTModel(config)
         layers = [
-            nn.Linear(self.hidden_size + 46, 200),
+            nn.Linear(self.hidden_size + 26, 200),
             nn.ReLU(),
             nn.Linear(200, 20)
         ]
