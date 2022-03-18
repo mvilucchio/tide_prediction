@@ -33,13 +33,18 @@ class PressureEncorderFull(nn.Module):
         config = ViTConfig(image_size = 41, patch_size = 4, num_channels = num_channels, encoder_stride = 4)
         self.hidden_size = int((image_size // encoder_stride)**2 + 1) * config.hidden_size
         self.ViT = ViTModel(config)
-        self.linear = nn.Linear(self.hidden_size + 46, 20)
-        
+        layers = [
+            nn.Linear(self.hidden_size + 46, 200),
+            nn.ReLU(),
+            nn.Linear(200, 20)
+        ]
+        self.mlp = nn.Sequential(*layers)
+
     def forward(self, x):
         pressure, surge, time, scale_and_size = x
         hidden = self.ViT(pressure).last_hidden_state.reshape(-1, self.hidden_size)
         x = torch.concat([hidden, surge, time, scale_and_size], dim = 1)
-        x = self.linear(x)
+        x = self.mlp(x)
         return x
 
 class PressureEncorderSemiFull(nn.Module):
@@ -48,13 +53,18 @@ class PressureEncorderSemiFull(nn.Module):
         config = ViTConfig(image_size = 41, patch_size = 4, num_channels = num_channels, encoder_stride = 4)
         self.hidden_size = int((image_size // encoder_stride)**2 + 1) * config.hidden_size
         self.ViT = ViTModel(config)
-        self.linear = nn.Linear(self.hidden_size + 26, 20)
+        layers = [
+            nn.Linear(self.hidden_size + 46, 200),
+            nn.ReLU(),
+            nn.Linear(200, 20)
+        ]
+        self.mlp = nn.Sequential(*layers)
         
     def forward(self, x):
         pressure, surge, scale_and_size = x
         hidden = self.ViT(pressure).last_hidden_state.reshape(-1, self.hidden_size)
         x = torch.concat([hidden, surge, scale_and_size], dim = 1)
-        x = self.linear(x)
+        x = self.mlp(x)
         return x
 
 class Encoder(nn.Module):
