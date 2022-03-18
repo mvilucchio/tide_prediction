@@ -8,7 +8,7 @@ from transformers import ViTFeatureExtractor, ViTModel, ViTConfig
 from torch.autograd import Variable
 import math
 
-device = torch.device('cuda')
+#device = torch.device('cuda')
 
 class PressureEncorder(nn.Module):
     def __init__(self, image_size = 41, patch_size = 4, num_channels = 1, encoder_stride = 4):
@@ -151,9 +151,19 @@ class EncoderSeqVit(nn.Module):
           # dropout = 0.1
         )
 
-        self.fc = nn.Linear(self.hidden_dim + 8, 2 * output_length)
+        # self.fc = nn.Linear(self.hidden_size1 + self.hidden_size2 + self.hidden_dim + 8, 2 * output_length)
+
+        layers = [
+            nn.Linear(self.hidden_size1 + self.hidden_size2 + self.hidden_dim + 8, 1000),
+            nn.ReLU(), 
+            nn.Linear(1000, 100),
+            nn.ReLU(),
+            nn.Linear(100, 2 * output_length)
+        ]
+
+        self.mlp = nn.Sequential(*layers)
    
-    def forward(self, x):
+    def forward(self, x, device=torch.device('cuda')):
         (
             pressure1, 
             pressure2, 
@@ -170,7 +180,7 @@ class EncoderSeqVit(nn.Module):
         hidden1 = self.ViT(pressure1).last_hidden_state.reshape(-1, self.hidden_size1)
         hidden2 = self.ViT(pressure2).last_hidden_state.reshape(-1, self.hidden_size2)
 
-        x = torch.empty(batch_size, self.seq_len, 4)
+        x = torch.empty(batch_size, self.seq_len, 4).to(device)
 
         x[:,:,-4:] = torch.concat(
             [time1.unsqueeze(2), time2.unsqueeze(2), surge1.unsqueeze(2), surge2.unsqueeze(2)], 
@@ -184,6 +194,8 @@ class EncoderSeqVit(nn.Module):
 
         last_x = torch.concat(
             [
+                hidden1,
+                hidden2,
                 hidden.squeeze(0), 
                 mean_surge_1.unsqueeze(1), 
                 mean_surge_2.unsqueeze(1), 
@@ -197,6 +209,6 @@ class EncoderSeqVit(nn.Module):
             dim=1
         )
 
-        out = self.fc(last_x)
+        out = self.mlp(last_x)
 
         return out
